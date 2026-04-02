@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>El Mundo Feliz</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: sans-serif;
+            touch-action: none; /* Evita zooms y scrolls indeseados en móvil */
+        }
+        canvas {
+            background-color: #000;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            position: relative;
+            z-index: 1;
+        }
+
+        /* --- CONTROLES MÓVILES (CSS) --- */
+        #touchControls {
+            display: none; /* Oculto por defecto (Modo PC) */
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; /* Permite que los clicks pasen al canvas donde no hay botones */
+            z-index: 10;
+        }
+        .touch-btn {
+            pointer-events: auto;
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.4);
+            border: 2px solid rgba(0, 0, 0, 0.6);
+            border-radius: 15px;
+            font-size: 24px;
+            color: #000;
+            font-weight: bold;
+            user-select: none;
+            -webkit-user-select: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .touch-btn:active {
+            background-color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* D-Pad (Cruceta) - Esquina inferior izquierda */
+        #dpad-container {
+            position: absolute;
+            bottom: 40px;
+            left: 40px;
+            width: 180px;
+            height: 180px;
+            pointer-events: none;
+        }
+        #btnUp { top: 0; left: 60px; width: 60px; height: 60px; }
+        #btnDown { bottom: 0; left: 60px; width: 60px; height: 60px; }
+        #btnLeft { top: 60px; left: 0; width: 60px; height: 60px; }
+        #btnRight { top: 60px; right: 0; width: 60px; height: 60px; }
+
+        /* Botón de Acción - Esquina inferior derecha */
+        #btnAction {
+            bottom: 40px;
+            right: 40px;
+            width: 120px;
+            height: 120px;
+            border-radius: 60px; /* Redondo */
+            opacity: 0.3; /* Opaco por defecto (inactivo) */
+            transition: opacity 0.2s, background-color 0.2s;
+            font-size: 18px;
+        }
+        #btnAction.active {
+            opacity: 1;
+            background-color: rgba(100, 255, 100, 0.8); /* Verde cuando está activo */
+            border-color: #000;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+<div id="touchControls">
+    <div id="dpad-container">
+        <div id="btnUp" class="touch-btn">▲</div>
+        <div id="btnLeft" class="touch-btn">◀</div>
+        <div id="btnRight" class="touch-btn">▶</div>
+        <div id="btnDown" class="touch-btn">▼</div>
+    </div>
+    <div id="btnAction" class="touch-btn">ACCIÓN</div>
+</div>
+
+<script>
+/**
+ * EL MUNDO FELIZ - Port a HTML5 Canvas/JavaScript
+ * Versión 3.0: Soporte Touch Inteligente, Ajustes y Bug Fixes
+ */
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- CONSTANTES ---
+const ANCHO = 1280;
+const ALTO = 720;
+const MAPA_ANCHO = 2560;
+const MAPA_ALTO = 1440;
+
+const COLORES = {
+    VERDE: '#228B22', AMARILLO: '#FFDF00', GRIS: '#808080',
+    BLANCO: '#FFFFFF', NEGRO: '#000000', GRIS_CLARO: '#C8C8C8',
+    ROJO: '#FF0000', MARRON: '#8B4513', NARANJA: '#FFA500'
+};
+
+// Configuración Global
+let modoMobile = false; 
+
+// --- RESPONSIVIDAD DEL CANVAS ---
+function resizeCanvas() {
+    const aspect = ANCHO / ALTO;
+    const windowAspect = window.innerWidth / window.innerHeight;
+    
+    if (windowAspect < aspect) {
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = (window.innerWidth / aspect) + 'px';
+    } else {
+        canvas.style.height = window.innerHeight + 'px';
+        canvas.style.width = (window.innerHeight * aspect) + 'px';
+    }
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas(); // Llamada inicial
+
+// --- GESTIÓN DE ENTRADA (INPUT) ---
+const keys = {};
+let lastKey = null;
+
+// Teclado
+window.addEventListener('keydown', (e) => {
+    keys[e.key.toLowerCase()] = true;
+    keys[e.code] = true;
+    lastKey = e.code;
+});
+window.addEventListener('keyup', (e) => {
+    keys[e.key.toLowerCase()] = false;
+    keys[e.code] = false;
+});
+
+// Ratón (Para el menú)
+const mouse = { x: 0, y: 0, click: false };
+function actualizarRaton(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    // Soporte para touch en menús (simulando ratón)
+    let clientX = e.clientX;
+    let clientY = e.clientY;
+    if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    }
+    
+    mouse.x = (clientX - rect.left) * scaleX;
+    mouse.y = (clientY - rect.top) * scaleY;
+}
+canvas.addEventListener('mousemove', actualizarRaton);
+canvas.addEventListener('touchmove', actualizarRaton, {passive: false});
+
+canvas.addEventListener('mousedown', (e) => { if(e.button === 0) mouse.click = true; });
+canvas.addEventListener('touchstart', (e) => { actualizarRaton(e); mouse.click = true; }, {passive: false});
+
+canvas.addEventListener('mouseup', () => { mouse.click = false; });
+canvas.addEventListener('touchend', () => { mouse.click = false; });
+
+// --- LÓGICA DE CONTROLES TÁCTILES HTML ---
+const touchControls = document.getElementById('touchControls');
+const btnAction = document.getElementById('btnAction');
+
+// Función mejorada para soportar tanto Touch como Mouse (Click)
+function bindTouchDpad(id, key1, key2) {
+    const el = document.getElementById(id);
+
+    // Lo que pasa cuando presionas (dedo o click)
+    const press = (e) => { 
+        e.preventDefault(); 
+        keys[key1] = true; 
+        keys[key2] = true; 
+    };
+
+    // Lo que pasa cuando sueltas (dedo o click)
+    const release = (e) => { 
+        e.preventDefault(); 
+        keys[key1] = false; 
+        keys[key2] = false; 
+    };
+
+    // Eventos Táctiles (Móvil)
+    el.addEventListener('touchstart', press);
+    el.addEventListener('touchend', release);
+    el.addEventListener('touchcancel', release);
+
+    // Eventos de Ratón (PC - Click izquierdo)
+    el.addEventListener('mousedown', press);
+    el.addEventListener('mouseup', release);
+    el.addEventListener('mouseleave', release); // Importante: por si arrastras el mouse fuera del botón
+}
+
+bindTouchDpad('btnUp', 'arrowup', 'w');
+bindTouchDpad('btnDown', 'arrowdown', 's');
+bindTouchDpad('btnLeft', 'arrowleft', 'a');
+bindTouchDpad('btnRight', 'arrowright', 'd');
+
+// Función de acción separada para usarla en ambos eventos
+const triggerAction = (e) => {
+    e.preventDefault();
+    // Si la interacción es válida
+    if (hayInteraccionCercana()) {
+        // Truco para el diálogo del gato azul en móvil (Mapear a la V de "Sí")
+        if (gameState.dialActivo && gameState.dialGato) {
+            lastKey = 'KeyV';
+        } else if (estadoJuego === "CONTINUARA" || estadoJuego === "CREDITOS") {
+            lastKey = 'Enter'; // Para avanzar pantallas finales
+        } else {
+            lastKey = 'Space';
+        }
+    }
+};
+
+// Asignar Touch y Click al botón de Acción
+btnAction.addEventListener('touchstart', triggerAction);
+btnAction.addEventListener('mousedown', triggerAction);
+
+// --- GESTIÓN DE ASSETS ---
+const assets = { images: {}, audio: {} };
+const loadPromise = [];
+
+function cargarImagen(nombre, w, h) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.src = `Images/${nombre}`;
+        img.onload = () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = w; tempCanvas.height = h;
+            const tCtx = tempCanvas.getContext('2d');
+            tCtx.drawImage(img, 0, 0, w, h);
+            assets.images[nombre] = tempCanvas;
+            resolve();
+        };
+        img.onerror = () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = w; tempCanvas.height = h;
+            const tCtx = tempCanvas.getContext('2d');
+            tCtx.fillStyle = COLORES.GRIS;
+            tCtx.fillRect(0, 0, w, h);
+            assets.images[nombre] = tempCanvas;
+            console.warn(`No se pudo cargar Images/${nombre}`);
+            resolve();
+        };
+    });
+}
+
+function cargarAudio(nombre, loop=false, vol=1.0) {
+    const audio = new Audio(`Audio/${nombre}`);
+    audio.loop = loop;
+    audio.volume = vol;
+    assets.audio[nombre] = audio;
+}
+
+// --- UTILIDADES ---
+function distancia(x1, y1, x2, y2) { return Math.sqrt((x2-x1)**2 + (y2-y1)**2); }
+
+function checarColision(rect1, rect2) {
+    return rect1.x < rect2.x + rect2.w &&
+           rect1.x + rect1.w > rect2.x &&
+           rect1.y < rect2.y + rect2.h &&
+           rect1.y + rect1.h > rect2.y;
+}
+
+// --- CLASES ---
+class ObjetoJuego {
+    constructor(x, y, nombreArchivo, w, h) {
+        this.x = x; this.y = y;
+        this.w = w; this.h = h;
+        this.nombreArchivo = nombreArchivo;
+        if(nombreArchivo) loadPromise.push(cargarImagen(nombreArchivo, w, h));
+    }
+    get centro() { return { x: this.x + this.w / 2, y: this.y + this.h / 2 }; }
+    get rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
+    dibujar(ctx, offsetX = 0, offsetY = 0) {
+        if (this.nombreArchivo && assets.images[this.nombreArchivo]) {
+            ctx.drawImage(assets.images[this.nombreArchivo], this.x - offsetX, this.y - offsetY);
+        }
+    }
+}
+
+class Personaje extends ObjetoJuego {
+    constructor(x, y, archivo, w, h, hablable = true, nombre = "", dialogo = "") {
+        super(x, y, archivo, w, h);
+        this.hablable = hablable;
+        this.nombre = nombre;
+        this.dialogo = dialogo;
+    }
+}
+
+class Jugador extends Personaje {
+    constructor(x, y) {
+        super(x, y, "Jugador.png", 40, 58, false);
+        this.velocidad = 3;
+    }
+    mover(dx, dy, obstaculos, limW, limH) {
+        if (dx !== 0 && dy !== 0) {
+            const factor = Math.sqrt(2);
+            dx /= factor; dy /= factor;
+        }
+        const nx = this.x + dx;
+        const ny = this.y + dy;
+        const nRect = { x: nx, y: ny, w: this.w, h: this.h };
+
+        let colision = false;
+        for (let obs of obstaculos) {
+            if (checarColision(nRect, obs.rect)) { colision = true; break; }
+        }
+
+        if (!colision && nx >= 0 && nx + this.w <= limW && ny >= 0 && ny + this.h <= limH) {
+            this.x = nx; this.y = ny;
+        }
+    }
+    puedeInteractuar(objetivo, rango = 70) {
+        const cj = this.centro; const co = objetivo.centro;
+        return distancia(cj.x, cj.y, co.x, co.y) <= rango;
+    }
+}
+
+class GatoAzul extends Personaje {
+    constructor(x, y) {
+        super(x, y, "GatoAzul.png", 36, 58, true, "Gato Azul", "¿Quieres ser mi amigo?");
+        this.es_amigo = false;
+    }
+    seguir(jx, jy, obstaculos, limW, limH) {
+        if (!this.es_amigo) return;
+        let dx = jx - this.x; let dy = jy - this.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 50) {
+            let nx = this.x + (dx/dist)*2;
+            let ny = this.y + (dy/dist)*2;
+            let nRect = { x: nx, y: ny, w: this.w, h: this.h };
+            let colision = obstaculos.some(obs => checarColision(nRect, obs.rect));
+            if (!colision && nx >= 0 && nx+this.w <= limW && ny >= 0 && ny+this.h <= limH) {
+                this.x = nx; this.y = ny;
+            }
+        }
+    }
+}
+
+class ConejoRojo extends Personaje {
+    constructor(x, y) {
+        super(x, y, "ConejoRojo.png", 36, 48, true, "Conejo Rojo", "¡POR QUÉ ME HAS DESPERTADO, TONTO!, ¡AHORA SENTIRÁS MI VERDADERO PODER!");
+        this.velocidad = 1.5;
+    }
+    perseguir(jx, jy, obstaculos, limW, limH) {
+        let dx = jx - this.x; let dy = jy - this.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 0) {
+            let nx = this.x + (dx/dist)*this.velocidad;
+            let ny = this.y + (dy/dist)*this.velocidad;
+            let nRect = { x: nx, y: ny, w: this.w, h: this.h };
+            let colision = obstaculos.some(obs => checarColision(nRect, obs.rect));
+            if (!colision && nx >= 0 && nx+this.w <= limW && ny >= 0 && ny+this.h <= limH) {
+                this.x = nx; this.y = ny;
+            }
+        }
+    }
+}
+
+class AutoMovil extends Personaje {
+    constructor(x, y, arc, w, h, r) {
+        super(x, y, arc, w, h, false);
+        this.vel = 1; this.dir = 1; this.xi = x; this.rango = r;
+    }
+    mover(obstaculos, limW) {
+        let nx = this.x + this.vel * this.dir;
+        let nRect = { x: nx, y: this.y, w: this.w, h: this.h };
+        let colision = obstaculos.some(obs => checarColision(nRect, obs.rect));
+        
+        if (colision || nx > this.xi + this.rango || nx < this.xi - this.rango || nx < 0 || nx + this.w > limW) {
+            this.dir *= -1;
+        } else {
+            this.x = nx;
+        }
+    }
+}
+
+class Lienzo extends ObjetoJuego {
+    constructor(x, y) { super(x, y, null, 100, 100); }
+    dibujar(ctx, ox=0, oy=0) {
+        ctx.fillStyle = COLORES.BLANCO;
+        ctx.fillRect(this.x - ox, this.y - oy, this.w, this.h);
+        ctx.strokeStyle = COLORES.NEGRO;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(this.x - ox, this.y - oy, this.w, this.h);
+    }
+}
+
+class Pecera extends ObjetoJuego {
+    constructor(x, y) {
+        super(x, y, "FishMissing.png", 24, 20);
+        loadPromise.push(cargarImagen("Fishbowl.png", 24, 20));
+        this.tiene_pez = false;
+    }
+    poner_pez() {
+        this.tiene_pez = true;
+        this.nombreArchivo = "Fishbowl.png";
+    }
+}
+
+// --- ESTADO DEL JUEGO ---
+let estadoJuego = "MENU";
+let gameState = {};
+let objs = {};
+
+function inicializarJuego() {
+    objs.jugador = new Jugador(MAPA_ANCHO/2, MAPA_ALTO/2);
+    objs.gato = new GatoAzul(MAPA_ANCHO/2 - 100, MAPA_ALTO/2);
+    
+    objs.perro = new Personaje(300, 300, "PerroAmarillo.png", 46, 38, true, "Perro Amarillo", "Ah, qué tranquilo es estar bajo el sol... ¡Guau!");
+    objs.conejoV = new Personaje(1200, 800, "ConejoVerde.png", 38, 48, true, "Conejo Verde", "¡POR QUÉ ME HAS DESPERTADO TONTO! ¡AHORA SENTIRÁS MI PODER!");
+    objs.elefante = new Personaje(500, 900, "ElefanteNaranja.png", 54, 56, true, "Elefante Naranja", "¡Wow!, me has hablado... casi nadie me habla TºT");
+    objs.papa = new Personaje(1300, 400, "PapáDeGatoAzul.png", 50, 60, true, "Papá de Gato Azul", "¡Hola!, veo que eres amigo de mi hijo, Gato Azul... ¡Dile que vaya a la escuela!");
+    objs.pezN = new Personaje(900, 700, "PezNegro.png", 20, 16, true, "Pez Negro", "¡Auxilio, me estoy ahogando!, ¡Ayúdame a regresar a mi pecera, está en la Escuela!");
+    objs.cangrejo = new AutoMovil(700, 250, "Cangrejo.png", 48, 18, 150);
+    
+    objs.leon = new Personaje(250, 300, "LeónMorado.png", 48, 56, true, "León Morado", "¡ROAAAAAAR!... ¿Te asustaste?, pues... yo tampoco...");
+    objs.raton = new Personaje(500, 350, "RatónProfesor.png", 52, 54, true, "Ratón Profesor", "Hola, veo que eres nuevo aquí... ¡Qué bueno que Gato Azul vino contigo!");
+    objs.zorro = new Personaje(150, 450, "ZorroMarrón.png", 40, 26, true, "Zorro Marrón", "Me voy a escapar de la escuela, jeje... ");
+    objs.mono = new Personaje(600, 200, "MonoRosa.png", 42, 38, true, "Mono Rosa", "¡Tres misiones! ¡Uh uh!, ¡Completar! ¡Uh uh! ¡Lápiz! ¡Uh uh!");
+    
+    objs.rana = new Personaje(200, 400, "RanaBlanca.png", 32, 18, true, "Rana Blanca", "No entiendo por qué a Perro Amarillo le gusta estar bajo el sol, ¡Muy caliente para mí!");
+    objs.arana = new AutoMovil(450, 250, "ArañaÍndigo.png", 20, 18, 150);
+    
+    objs.escuela = new ObjetoJuego(1400, 300, "EscuelaFeliz.png", 70, 68);
+    objs.cuevaN = new ObjetoJuego(400, 600, "Cueva.png", 78, 38);
+    objs.cuevaG = new ObjetoJuego(250, 350, "Cueva.png", 78, 38);
+    objs.puertaF = new ObjetoJuego(700, 200, "Puerta.png", 36, 66);
+    objs.pecera = new Pecera(350, 150);
+    objs.p_zorro = new ObjetoJuego(ANCHO/2-18, ALTO/2-33, "PuertaAmarilla.png", 36, 66);
+    objs.p_elefante = new ObjetoJuego(100, 270, "PuertaAmarilla.png", 36, 66);
+    objs.lienzo = new Lienzo(ANCHO/2-50, ALTO/2-50);
+    
+    objs.c_elefante = new ObjetoJuego(450, 1000, "CasaDeElefanteNaranja.png", 170, 150);
+    objs.c_gato = new ObjetoJuego(1000, 300, "CasaDeFamiliaGatoAzul.png", 180, 180);
+    objs.c_conejo = new ObjetoJuego(1100, 900, "CasaDelConejo.png", 150, 140);
+    objs.c_leon = new ObjetoJuego(200, 120, "CasaDeLeónMorado.png", 180, 160);
+    objs.c_mono = new ObjetoJuego(50, 500, "CasaDeMonoRosa.png", 140, 150);
+    objs.c_perro = new ObjetoJuego(250, 400, "CasaDePerroAmarillo.png", 140, 160);
+    objs.c_pez = new ObjetoJuego(950, 600, "CasaDePezNegro.png", 150, 145);
+    objs.c_zorro = new ObjetoJuego(600, 300, "CasaDeZorroMarrón.png", 145, 135);
+    
+    objs.flor = new ObjetoJuego(ANCHO/2-7, ALTO/2-6, "Flor.png", 14, 12);
+    objs.flor.recogida = false;
+    
+    loadPromise.push(cargarImagen("LAPIZMAGICO.png", 23, 23));
+
+    gameState = {
+        dim: "normal",
+        conejo_trans: false, conejoRojoObj: null,
+        flor: false, pez: false, lapiz: false, pezRecogido: false,
+        m_pez: false, z_escapado: false, z_casa: false, z_siguiendo: false, m_zorro: false,
+        c_durmiendo: false, mis_completas: false, lapiz_entregado: false, creditos: false,
+        dialActivo: false, dialNom: "", dialTxt: "", dialGato: false, dialZorro: 0, dialSec: false
+    };
+}
+
+function playSound(name) { 
+    if(assets.audio[name]) { 
+        assets.audio[name].currentTime = 0; 
+        assets.audio[name].play().catch(e=>console.log("Audio autoplay blocked")); 
+    } 
+}
+
+function drawUI(ctx) {
+    if (gameState.dialActivo) {
+        ctx.fillStyle = COLORES.GRIS_CLARO;
+        ctx.fillRect(50, ALTO - 140, ANCHO - 100, 120);
+        ctx.strokeStyle = COLORES.NEGRO;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(50, ALTO - 140, ANCHO - 100, 120);
+        
+        ctx.fillStyle = COLORES.NEGRO;
+        ctx.font = "bold 28px sans-serif";
+        ctx.fillText(gameState.dialNom + ":", 70, ALTO - 105);
+        ctx.font = "24px sans-serif";
+        ctx.fillText(gameState.dialTxt, 70, ALTO - 70);
+        ctx.font = "18px sans-serif";
+        
+        // Instrucción adaptada según el modo
+        let inst = gameState.dialGato 
+            ? (modoMobile ? "Toca ACCIÓN para Sí (Elige ignorar para No)" : "Presiona V (Sí) o X (No)") 
+            : (modoMobile ? "Toca ACCIÓN para continuar" : "Presiona ESPACIO para cerrar");
+        ctx.fillText(inst, 70, ALTO - 30);
+    }
+
+    let invCount = 0;
+    const s = 50; const sy = 60;
+    ctx.font = "20px sans-serif";
+    ctx.fillStyle = COLORES.NEGRO;
+
+    if (gameState.flor) {
+        let sx = ANCHO - 100 - (invCount * 60);
+        ctx.fillStyle = COLORES.BLANCO; ctx.fillRect(sx, sy, s, s); ctx.strokeRect(sx, sy, s, s);
+        ctx.drawImage(assets.images["Flor.png"], sx + 18, sy + 19);
+        ctx.fillStyle = COLORES.NEGRO; ctx.fillText("Flor:", sx - 40, sy + 30);
+        invCount++;
+    }
+    if (gameState.pez) {
+        let sx = ANCHO - 100 - (invCount * 60);
+        ctx.fillStyle = COLORES.BLANCO; ctx.fillRect(sx, sy, s, s); ctx.strokeRect(sx, sy, s, s);
+        ctx.drawImage(assets.images["PezNegro.png"], sx + 15, sy + 17);
+        ctx.fillStyle = COLORES.NEGRO; ctx.fillText("Pez:", sx - 35, sy + 30);
+        invCount++;
+    }
+    if (gameState.lapiz) {
+        let sx = ANCHO - 100 - (invCount * 60);
+        ctx.fillStyle = COLORES.BLANCO; ctx.fillRect(sx, sy, s, s); ctx.strokeRect(sx, sy, s, s);
+        ctx.drawImage(assets.images["LAPIZMAGICO.png"], sx + 13, sy + 13);
+        ctx.fillStyle = COLORES.NEGRO; ctx.fillText("Lápiz:", sx - 45, sy + 30);
+    }
+}
+
+// Parpadeo original
+function indicador(x, y, w, ox=0, oy=0) {
+    if (Math.floor(Date.now() / 333) % 2 === 0) {
+        ctx.beginPath();
+        ctx.arc(x + w/2 - ox, y - 10 - oy, 5, 0, Math.PI*2);
+        ctx.fillStyle = COLORES.ROJO;
+        ctx.fill();
+    }
+}
+
+// Determinar si hay algo con lo que interactuar (útil para el botón touch)
+function hayInteraccionCercana() {
+    if (gameState.dialActivo) return true;
+    if (estadoJuego === "CONTINUARA" || estadoJuego === "CREDITOS") return true;
+
+    let cJugador = objs.jugador.centro;
+    let getDist = (obj) => distancia(cJugador.x, cJugador.y, obj.centro.x, obj.centro.y);
+
+    if (gameState.dim === "normal") {
+        if (gameState.lapiz && !gameState.creditos && getDist(objs.c_elefante) <= 100) return true;
+        if (gameState.z_escapado && gameState.z_casa && !gameState.m_zorro && getDist(objs.c_zorro) <= 100) return true;
+        if (getDist(objs.escuela) <= 80) return true;
+        if (getDist(objs.cuevaN) <= 80) return true;
+
+        let npcs = [objs.perro, objs.elefante, objs.papa, objs.gato];
+        if (!gameState.conejo_trans) npcs.push(objs.conejoV);
+        if (gameState.conejoRojoObj) npcs.push(gameState.conejoRojoObj);
+        if (!gameState.pezRecogido) npcs.push(objs.pezN);
+
+        return npcs.some(n => n.hablable && objs.jugador.puedeInteractuar(n));
+    } else if (gameState.dim === "casa_elefante") {
+        if (getDist(objs.p_elefante) <= 80) return true;
+        if (gameState.lapiz && getDist(objs.lienzo) <= 80) return true;
+    } else if (gameState.dim === "casa_zorro") {
+        if (getDist(objs.p_zorro) <= 80) return true;
+        if (objs.zorro.hablable && objs.jugador.puedeInteractuar(objs.zorro)) return true;
+    } else if (gameState.dim === "feliz") {
+        if (getDist(objs.puertaF) <= 80) return true;
+        if (gameState.pez && !gameState.m_pez && getDist(objs.pecera) <= 50) return true;
+        
+        let npcsF = [objs.leon, objs.raton, objs.mono];
+        if (!(gameState.z_escapado && !gameState.m_zorro)) npcsF.push(objs.zorro);
+        return npcsF.some(n => n.hablable && objs.jugador.puedeInteractuar(n));
+    } else if (gameState.dim === "gris") {
+        if (getDist(objs.cuevaG) <= 80) return true;
+        if (objs.rana.hablable && objs.jugador.puedeInteractuar(objs.rana)) return true;
+        if (!objs.flor.recogida && getDist(objs.flor) <= 50) return true;
+    }
+    return false;
+}
+
+function dibujarIndicadores(ctx, ox, oy) {
+    let cJugador = objs.jugador.centro;
+    let getDist = (obj) => distancia(cJugador.x, cJugador.y, obj.centro.x, obj.centro.y);
+
+    if (gameState.dim === "normal") {
+        if (gameState.lapiz && !gameState.creditos && getDist(objs.c_elefante) <= 100) indicador(objs.c_elefante.x, objs.c_elefante.y, objs.c_elefante.w, ox, oy);
+        if (gameState.z_escapado && gameState.z_casa && !gameState.m_zorro && getDist(objs.c_zorro) <= 100) indicador(objs.c_zorro.x, objs.c_zorro.y, objs.c_zorro.w, ox, oy);
+        if (getDist(objs.escuela) <= 80) indicador(objs.escuela.x, objs.escuela.y, objs.escuela.w, ox, oy);
+        if (getDist(objs.cuevaN) <= 80) indicador(objs.cuevaN.x, objs.cuevaN.y, objs.cuevaN.w, ox, oy);
+
+        let npcs = [objs.perro, objs.elefante, objs.papa, objs.gato];
+        if (!gameState.conejo_trans) npcs.push(objs.conejoV);
+        if (gameState.conejoRojoObj) npcs.push(gameState.conejoRojoObj);
+        if (!gameState.pezRecogido) npcs.push(objs.pezN);
+
+        npcs.forEach(n => {
+            if (n.hablable && objs.jugador.puedeInteractuar(n)) indicador(n.x, n.y, n.w, ox, oy);
+        });
+
+    } else if (gameState.dim === "casa_elefante") {
+        if (getDist(objs.p_elefante) <= 80) indicador(objs.p_elefante.x, objs.p_elefante.y, objs.p_elefante.w);
+        if (gameState.lapiz && getDist(objs.lienzo) <= 80) indicador(objs.lienzo.x, objs.lienzo.y, objs.lienzo.w);
+        
+    } else if (gameState.dim === "casa_zorro") {
+        if (getDist(objs.p_zorro) <= 80) indicador(objs.p_zorro.x, objs.p_zorro.y, objs.p_zorro.w);
+        if (objs.zorro.hablable && objs.jugador.puedeInteractuar(objs.zorro)) indicador(objs.zorro.x, objs.zorro.y, objs.zorro.w);
+        
+    } else if (gameState.dim === "feliz") {
+        if (getDist(objs.puertaF) <= 80) indicador(objs.puertaF.x, objs.puertaF.y, objs.puertaF.w);
+        if (gameState.pez && !gameState.m_pez && getDist(objs.pecera) <= 50) indicador(objs.pecera.x, objs.pecera.y, objs.pecera.w);
+        
+        let npcsF = [objs.leon, objs.raton, objs.mono];
+        if (!(gameState.z_escapado && !gameState.m_zorro)) npcsF.push(objs.zorro);
+        npcsF.forEach(n => {
+            if (n.hablable && objs.jugador.puedeInteractuar(n)) indicador(n.x, n.y, n.w);
+        });
+        
+    } else if (gameState.dim === "gris") {
+        if (getDist(objs.cuevaG) <= 80) indicador(objs.cuevaG.x, objs.cuevaG.y, objs.cuevaG.w);
+        if (objs.rana.hablable && objs.jugador.puedeInteractuar(objs.rana)) indicador(objs.rana.x, objs.rana.y, objs.rana.w);
+        if (!objs.flor.recogida && getDist(objs.flor) <= 50) indicador(objs.flor.x, objs.flor.y, objs.flor.w);
+    }
+}
+
+// BUCLE PRINCIPAL
+function loop() {
+    requestAnimationFrame(loop);
+    
+    // Esconder controles táctiles si no estamos en el juego
+    if (estadoJuego !== "JUEGO" || !modoMobile) {
+        touchControls.style.display = "none";
+    }
+
+    if (estadoJuego === "MENU") {
+        ctx.fillStyle = COLORES.VERDE; ctx.fillRect(0,0,ANCHO,ALTO);
+        ctx.fillStyle = COLORES.BLANCO; ctx.textAlign = "center";
+        ctx.font = "100px sans-serif"; ctx.fillText("El Mundo Feliz", ANCHO/2, ALTO/4);
+        ctx.font = "30px sans-serif"; ctx.fillStyle = "#CCC"; ctx.fillText("By Ignacio & Joaquín (JS Port v3.0)", ANCHO/2, ALTO/4 + 70);
+        
+        // Botón Jugar
+        const bJ = {x: ANCHO/2 - 150, y: ALTO/2, w:300, h:80};
+        const hbJ = mouse.x > bJ.x && mouse.x < bJ.x+bJ.w && mouse.y > bJ.y && mouse.y < bJ.y+bJ.h;
+        ctx.fillStyle = hbJ ? '#96FF96' : '#64C864';
+        ctx.beginPath(); ctx.roundRect(bJ.x, bJ.y, bJ.w, bJ.h, 15); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = COLORES.BLANCO; ctx.font = "50px sans-serif"; ctx.fillText("JUGAR", ANCHO/2, ALTO/2 + 55);
+
+        // Botón Ajustes
+        const bA = {x: ANCHO/2 - 150, y: ALTO/2 + 100, w:300, h:80};
+        const hbA = mouse.x > bA.x && mouse.x < bA.x+bA.w && mouse.y > bA.y && mouse.y < bA.y+bA.h;
+        ctx.fillStyle = hbA ? '#96FF96' : '#64C864';
+        ctx.beginPath(); ctx.roundRect(bA.x, bA.y, bA.w, bA.h, 15); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = COLORES.BLANCO; ctx.font = "40px sans-serif"; ctx.fillText("AJUSTES", ANCHO/2, ALTO/2 + 155);
+
+        if (mouse.click) {
+            if (hbJ) {
+                playSound('ClickMC.mp3');
+                if(assets.audio['Carefree(BackgroundMusic).mp3']) assets.audio['Carefree(BackgroundMusic).mp3'].play().catch(e=>{});
+                estadoJuego = "JUEGO";
+                if (modoMobile) touchControls.style.display = "block"; // Mostrar controles al jugar
+            } else if (hbA) {
+                playSound('ClickMC.mp3');
+                estadoJuego = "AJUSTES";
+            }
+            mouse.click = false;
+        }
+        ctx.textAlign = "left";
+        return;
+    }
+
+    if (estadoJuego === "AJUSTES") {
+        ctx.fillStyle = COLORES.VERDE; ctx.fillRect(0,0,ANCHO,ALTO);
+        ctx.fillStyle = COLORES.BLANCO; ctx.textAlign = "center";
+        ctx.font = "80px sans-serif"; ctx.fillText("Ajustes", ANCHO/2, ALTO/4);
+
+        // Botón Modo PC
+        const bPC = {x: ANCHO/2 - 150, y: 300, w:300, h:80};
+        const hbPC = mouse.x > bPC.x && mouse.x < bPC.x+bPC.w && mouse.y > bPC.y && mouse.y < bPC.y+bPC.h;
+        ctx.fillStyle = !modoMobile ? '#FFD700' : (hbPC ? '#96FF96' : '#64C864'); // Resaltar si está activo
+        ctx.beginPath(); ctx.roundRect(bPC.x, bPC.y, bPC.w, bPC.h, 15); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = COLORES.NEGRO; ctx.font = "40px sans-serif"; ctx.fillText("Modo PC", ANCHO/2, 355);
+
+        // Botón Modo Mobile
+        const bMob = {x: ANCHO/2 - 150, y: 400, w:300, h:80};
+        const hbMob = mouse.x > bMob.x && mouse.x < bMob.x+bMob.w && mouse.y > bMob.y && mouse.y < bMob.y+bMob.h;
+        ctx.fillStyle = modoMobile ? '#FFD700' : (hbMob ? '#96FF96' : '#64C864'); // Resaltar si está activo
+        ctx.beginPath(); ctx.roundRect(bMob.x, bMob.y, bMob.w, bMob.h, 15); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = COLORES.NEGRO; ctx.font = "40px sans-serif"; ctx.fillText("Modo Mobile", ANCHO/2, 455);
+
+        // Botón Volver
+        const bV = {x: ANCHO/2 - 150, y: 550, w:300, h:80};
+        const hbV = mouse.x > bV.x && mouse.x < bV.x+bV.w && mouse.y > bV.y && mouse.y < bV.y+bV.h;
+        ctx.fillStyle = hbV ? '#FF9696' : '#C86464';
+        ctx.beginPath(); ctx.roundRect(bV.x, bV.y, bV.w, bV.h, 15); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = COLORES.BLANCO; ctx.font = "40px sans-serif"; ctx.fillText("VOLVER", ANCHO/2, 605);
+
+        if (mouse.click) {
+            playSound('ClickMC.mp3');
+            if (hbPC) modoMobile = false;
+            else if (hbMob) modoMobile = true;
+            else if (hbV) estadoJuego = "MENU";
+            mouse.click = false;
+        }
+        ctx.textAlign = "left";
+        return;
+    }
+    
+    if (estadoJuego === "CONTINUARA") {
+        ctx.fillStyle = COLORES.BLANCO; ctx.fillRect(0,0,ANCHO,ALTO);
+        ctx.fillStyle = COLORES.NEGRO; ctx.textAlign = "center";
+        ctx.font = "80px sans-serif"; ctx.fillText("Continuará...", ANCHO/2, ALTO/2);
+        ctx.font = "30px sans-serif"; 
+        ctx.fillText(modoMobile ? "Toca ACCIÓN para continuar" : "Presiona ENTER para continuar", ANCHO/2, ALTO/2 + 80);
+        if (lastKey === 'Enter') { playSound('ClickMC.mp3'); estadoJuego = "CREDITOS"; lastKey=null; }
+        ctx.textAlign = "left"; return;
+    }
+    
+    if (estadoJuego === "CREDITOS") {
+        ctx.fillStyle = COLORES.BLANCO; ctx.fillRect(0,0,ANCHO,ALTO);
+        ctx.fillStyle = COLORES.NEGRO; ctx.textAlign = "center";
+        ctx.font = "60px sans-serif"; ctx.fillText("CRÉDITOS", ANCHO/2, 100);
+        ctx.font = "30px sans-serif";
+        const creds = ["Creador: Ignacio", "Tuvo la idea... y ya :P...", "", "Co-creador: Joaquín", "Escribió los prompts para Claude xdxdxd", "", "Programadores: Claude & Gemini", "IAs chambeando en el port web y mobile"];
+        creds.forEach((c, i) => ctx.fillText(c, ANCHO/2, 200 + i*40));
+        ctx.font = "25px sans-serif"; 
+        ctx.fillText(modoMobile ? "Toca ACCIÓN para volver al juego" : "Presiona ENTER para volver al juego", ANCHO/2, ALTO-50);
+        if (lastKey === 'Enter') { 
+            playSound('ClickMC.mp3'); estadoJuego = "JUEGO"; gameState.creditos = true; objs.mono.dialogo = "¡Bienvenido de nuevo!, ¡Uh uh!, ¡¿Qué tal te fue?!, ¡UH UH!"; lastKey=null; 
+            if (modoMobile) touchControls.style.display = "block"; // Restaurar UI Mobile
+        }
+        ctx.textAlign = "left"; return;
+    }
+
+    // --- LOGICA DEL JUEGO PRINCIPAL ---
+    
+    // Activar/Desactivar botón de ACCIÓN en móvil visualmente
+    if (modoMobile && estadoJuego === "JUEGO") {
+        if (hayInteraccionCercana()) {
+            btnAction.classList.add('active');
+        } else {
+            btnAction.classList.remove('active');
+        }
+    }
+
+    let dx = 0; let dy = 0;
+    if (!gameState.dialActivo) {
+        if (keys['arrowleft'] || keys['a']) dx = -objs.jugador.velocidad;
+        if (keys['arrowright'] || keys['d']) dx = objs.jugador.velocidad;
+        if (keys['arrowup'] || keys['w']) dy = -objs.jugador.velocidad;
+        if (keys['arrowdown'] || keys['s']) dy = objs.jugador.velocidad;
+    }
+
+    let actType = null;
+
+    if (gameState.dialActivo) {
+        if (lastKey === 'KeyX' && gameState.dialGato) {
+            playSound('ClickMC.mp3'); gameState.dialNom="Gato Azul"; gameState.dialTxt="Ay, ¡Qué mal!..."; gameState.dialGato=false; lastKey=null;
+        } else if (lastKey === 'KeyV' && gameState.dialGato) {
+            playSound('ClickMC.mp3'); gameState.dialNom="Gato Azul"; gameState.dialTxt="¡¿EN SERIO?!, ¡GENIAL!"; gameState.dialGato=false;
+            objs.gato.es_amigo = true; objs.gato.hablable = false; objs.gato.dialogo="¡Gracias por ser mi amigo! :3"; lastKey=null;
+        } else if (lastKey === 'Space') {
+            playSound('ClickMC.mp3');
+            if(gameState.dialZorro===1){ gameState.dialNom="Gato Azul"; gameState.dialTxt="Pero... ¡Tienes que volver a la escuela!, a mi tampoco me gusta, pero... ¡Estamos preocupados por ti!"; gameState.dialZorro=2; lastKey=null; return;}
+            if(gameState.dialZorro===2){ gameState.dialNom="Zorro Marrón"; gameState.dialTxt="Ah, bueno, supongo que tienes razón... está bien, voy con ustedes, vamos a la Escuela..."; gameState.dialZorro=3; gameState.z_siguiendo=true; lastKey=null; return;}
+            gameState.dialActivo=false; gameState.dialGato=false; gameState.dialZorro=0;
+            if(gameState.dialSec){ gameState.dialActivo=true; gameState.dialNom="Gato Azul"; gameState.dialTxt="Ok :3"; gameState.dialSec=false; }
+            lastKey = null;
+        }
+    } else if (lastKey === 'Space') {
+        if (gameState.dim === "normal") {
+            if (gameState.m_pez && gameState.c_durmiendo && gameState.m_zorro && !gameState.mis_completas) gameState.mis_completas=true;
+            if (gameState.m_pez && gameState.c_durmiendo && !gameState.z_escapado) { gameState.z_escapado=true; gameState.z_casa=true; }
+            
+            if (gameState.lapiz && !gameState.creditos && objs.jugador.puedeInteractuar(objs.c_elefante, 100)) {
+                gameState.dim = "casa_elefante"; objs.jugador.x = objs.p_elefante.x - 50; objs.jugador.y = objs.p_elefante.y; actType = 'obj';
+            } else if (!actType && gameState.z_escapado && gameState.z_casa && !gameState.m_zorro && objs.jugador.puedeInteractuar(objs.c_zorro, 100)) {
+                gameState.dim = "casa_zorro"; objs.jugador.x = objs.p_zorro.x - 50; objs.jugador.y = objs.p_zorro.y; 
+                objs.zorro.x = ANCHO/2+100; objs.zorro.y=ALTO/2; actType = 'obj';
+            } else if (!actType && objs.jugador.puedeInteractuar(objs.escuela, 80)) {
+                if (gameState.z_siguiendo){ gameState.z_siguiendo=false; gameState.z_casa=false; gameState.m_zorro=true; objs.zorro.x=150; objs.zorro.y=450;
+                    objs.leon.dialogo="¡ROAAAAAAR!... ¿Te asustaste?, pues... yo tampoco..."; objs.raton.dialogo="Hola, veo que eres nuevo aquí... ¡Qué bueno que Gato Azul vino contigo!"; objs.mono.dialogo="¡Tres misiones! ¡Uh uh!, ¡Completar! ¡Uh uh! ¡Lápiz! ¡Uh uh!"; objs.zorro.dialogo="Olvidé lo aburrido que era este lugar... !Hasta dan ganas de volverse a escapar! >:3"; }
+                gameState.dim = "feliz"; objs.jugador.x = objs.puertaF.x - 50; objs.jugador.y = objs.puertaF.y; actType = 'obj';
+            } else if (!actType && objs.jugador.puedeInteractuar(objs.cuevaN, 80)) {
+                gameState.dim = "gris"; objs.jugador.x = objs.cuevaG.x - 50; objs.jugador.y = objs.cuevaG.y; actType = 'obj';
+            } else if (!actType) {
+                let npcs = [objs.perro, objs.elefante, objs.gato, objs.papa];
+                if(!gameState.conejo_trans) npcs.push(objs.conejoV); if(!gameState.pezRecogido) npcs.push(objs.pezN);
+                for(let n of npcs){
+                    if(n.hablable && objs.jugador.puedeInteractuar(n)){
+                        gameState.dialActivo=true; gameState.dialNom=n.nombre; 
+                        gameState.dialTxt = (n===objs.conejoV && gameState.c_durmiendo) ? "zzz..." : n.dialogo;
+                        if(n===objs.gato && !objs.gato.es_amigo) gameState.dialGato=true;
+                        if(n===objs.papa && objs.gato.es_amigo) gameState.dialSec=true;
+                        if(n===objs.conejoV && !gameState.conejo_trans && !gameState.c_durmiendo){ gameState.conejo_trans=true; gameState.conejoRojoObj = new ConejoRojo(n.x, n.y); }
+                        
+                        // FIX DEL PEZ: Eliminada la restricción de "!gameState.flor"
+                        if(n===objs.pezN){ gameState.pezRecogido=true; gameState.pez=true; } 
+                        
+                        actType = 'npc'; break;
+                    }
+                }
+            }
+            if (!actType && gameState.conejoRojoObj && objs.jugador.puedeInteractuar(gameState.conejoRojoObj)) {
+                if(gameState.flor){
+                    gameState.dialActivo=true; gameState.dialNom="Conejo Verde"; gameState.dialTxt="¡Gracias por la flor! Ya puedo dormir tranquilo... por ahora...";
+                    gameState.conejo_trans=false; gameState.conejoRojoObj=null; objs.conejoV.x = objs.jugador.x+60; objs.conejoV.y=objs.jugador.y;
+                    gameState.c_durmiendo=true; gameState.flor=false; actType = 'npc';
+                } else {
+                    gameState.dialActivo=true; gameState.dialNom=gameState.conejoRojoObj.nombre; gameState.dialTxt=gameState.conejoRojoObj.dialogo; actType = 'npc';
+                }
+            }
+        } else if (gameState.dim === "casa_elefante") {
+            if(gameState.lapiz && objs.jugador.puedeInteractuar(objs.lienzo, 80)){ playSound('Pencil.mp3'); estadoJuego="CONTINUARA"; touchControls.style.display="none"; actType = 'obj';}
+            if(!actType && objs.jugador.puedeInteractuar(objs.p_elefante, 80)){ gameState.dim="normal"; objs.jugador.x=objs.c_elefante.x-100; objs.jugador.y=objs.c_elefante.y; actType = 'obj';}
+        } else if (gameState.dim === "casa_zorro") {
+            if(objs.jugador.puedeInteractuar(objs.p_zorro, 80)){ gameState.dim="normal"; objs.jugador.x=objs.c_zorro.x-100; objs.jugador.y=objs.c_zorro.y; actType = 'obj'; }
+            if(!actType && objs.zorro.hablable && objs.jugador.puedeInteractuar(objs.zorro)){ gameState.dialActivo=true; gameState.dialNom="Zorro Marrón"; gameState.dialTxt="¡Soy libre!, ¡LIBRE!"; gameState.dialZorro=1; actType = 'npc';}
+        } else if (gameState.dim === "feliz") {
+            if(gameState.pez && !gameState.m_pez && objs.jugador.puedeInteractuar(objs.pecera,50)){ objs.pecera.poner_pez(); gameState.pez=false; gameState.m_pez=true; gameState.dialActivo=true; gameState.dialNom="Pez Negro"; gameState.dialTxt="¡Muchas gracias! XD"; actType = 'npc';}
+            if(!actType && objs.jugador.puedeInteractuar(objs.puertaF,80)){ gameState.dim="normal"; objs.jugador.x=objs.escuela.x-100; objs.jugador.y=objs.escuela.y; actType = 'obj'; }
+            if(!actType){
+                if(gameState.z_escapado && !gameState.m_zorro){ objs.leon.dialogo="Creo que Zorro ya no está porque lo asusté..."; objs.raton.dialogo="Oh, no... se escapó Zorro Marrón..."; objs.mono.dialogo="¡Zorro! ¡Uh uh!, ¡Nueva misión!, ¡Uh uh!"; }
+                let npcsF = [objs.leon, objs.raton, objs.mono];
+                if(!(gameState.z_escapado && !gameState.m_zorro)) npcsF.push(objs.zorro);
+                for(let n of npcsF){
+                    if(n.hablable && objs.jugador.puedeInteractuar(n)){
+                        if(n===objs.mono && gameState.mis_completas && !gameState.lapiz_entregado){ gameState.dialActivo=true; gameState.dialNom="Mono Rosa"; gameState.dialTxt="¿Misiones completadas?, Yo, Mono Rosa, estar orgulloso ¡Uh uh!, ¡Toma! ¡Uh uh!"; gameState.lapiz=true; gameState.lapiz_entregado=true; objs.mono.dialogo="¡Usar lápiz!, ¡Casa Naranja!, !Uh uh!"; actType = 'npc'; break;}
+                        gameState.dialActivo=true; gameState.dialNom=n.nombre; gameState.dialTxt=n.dialogo; actType = 'npc'; break;
+                    }
+                }
+            }
+        } else if (gameState.dim === "gris") {
+            if(objs.jugador.puedeInteractuar(objs.cuevaG,80)){ gameState.dim="normal"; objs.jugador.x=objs.cuevaN.x-100; objs.jugador.y=objs.cuevaN.y; actType = 'obj'; }
+            if(!actType && objs.rana.hablable && objs.jugador.puedeInteractuar(objs.rana)){ gameState.dialActivo=true; gameState.dialNom=objs.rana.nombre; gameState.dialTxt=objs.rana.dialogo; actType = 'npc'; }
+            if(!actType && !objs.flor.recogida && objs.jugador.puedeInteractuar(objs.flor,50)){ objs.flor.recogida=true; gameState.flor=true; actType = 'obj'; }
+        }
+
+        if (actType) {
+            playSound('ClickMC.mp3');
+            if (actType === 'npc') playSound('PersonajesHablando.mp3');
+            
+            if (gameState.dim !== "normal" && gameState.dim !== "casa_elefante" && gameState.dim !== "casa_zorro" && gameState.dim !== "feliz" && gameState.dim !== "gris") {
+                 objs.gato.x = objs.jugador.x - 50; objs.gato.y = objs.jugador.y;
+                 if(gameState.z_siguiendo){ objs.zorro.x = objs.jugador.x - 100; objs.zorro.y = objs.jugador.y; }
+            }
+        }
+        lastKey = null;
+    }
+
+    // Fisicas
+    let obs = []; let wL = ANCHO; let hL = ALTO;
+    if(gameState.dim === "normal"){
+        obs = [objs.escuela, objs.cuevaN, objs.c_gato, objs.c_conejo, objs.c_leon, objs.c_mono, objs.c_perro, objs.c_pez];
+        if(!(gameState.z_escapado && gameState.z_casa && !gameState.m_zorro)) obs.push(objs.c_zorro);
+        if(!(gameState.lapiz && !gameState.creditos)) obs.push(objs.c_elefante);
+        wL = MAPA_ANCHO; hL = MAPA_ALTO;
+    } else if (gameState.dim === "feliz"){ obs=[objs.puertaF, objs.pecera]; }
+    else if (gameState.dim === "gris"){ obs=[objs.cuevaG]; }
+    else if (gameState.dim === "casa_zorro"){ obs=[objs.p_zorro]; }
+    else if (gameState.dim === "casa_elefante"){ obs=[objs.p_elefante]; }
+
+    if(!gameState.dialActivo) objs.jugador.mover(dx, dy, obs, wL, hL);
+    objs.gato.seguir(objs.jugador.x, objs.jugador.y, obs, wL, hL);
+    if(gameState.dim === "normal") objs.cangrejo.mover(obs, wL);
+    if(gameState.dim === "gris") objs.arana.mover(obs, wL);
+    if(gameState.dim === "normal" && gameState.conejoRojoObj) gameState.conejoRojoObj.perseguir(objs.jugador.x, objs.jugador.y, obs, wL, hL);
+    if(gameState.z_siguiendo){ objs.zorro.x += (objs.jugador.x - objs.zorro.x)*0.05; objs.zorro.y += (objs.jugador.y - objs.zorro.y)*0.05; }
+
+    // Camara
+    let ox = 0, oy = 0;
+    if(gameState.dim === "normal"){
+        ox = objs.jugador.x + objs.jugador.w/2 - ANCHO/2;
+        oy = objs.jugador.y + objs.jugador.h/2 - ALTO/2;
+        ox = Math.max(0, Math.min(ox, MAPA_ANCHO - ANCHO));
+        oy = Math.max(0, Math.min(oy, MAPA_ALTO - ALTO));
+    }
+
+    // Dibujar Gráficos
+    if(gameState.dim==="normal"){
+        ctx.fillStyle = COLORES.VERDE; ctx.fillRect(0,0,ANCHO,ALTO);
+        [objs.c_elefante, objs.c_gato, objs.c_conejo, objs.c_leon, objs.c_mono, objs.c_perro, objs.c_pez, objs.c_zorro, objs.escuela, objs.cuevaN, objs.perro, objs.elefante, objs.papa, objs.cangrejo].forEach(o=>o.dibujar(ctx, ox, oy));
+        if(!gameState.conejo_trans) objs.conejoV.dibujar(ctx, ox, oy);
+        if(gameState.conejoRojoObj) gameState.conejoRojoObj.dibujar(ctx, ox, oy);
+        if(!gameState.pezRecogido) objs.pezN.dibujar(ctx, ox, oy);
+        if(gameState.z_siguiendo) objs.zorro.dibujar(ctx, ox, oy);
+    } else if (gameState.dim==="casa_elefante"){
+        ctx.fillStyle = COLORES.NARANJA; ctx.fillRect(0,0,ANCHO,ALTO);
+        objs.p_elefante.dibujar(ctx); objs.lienzo.dibujar(ctx);
+    } else if (gameState.dim==="casa_zorro"){
+        ctx.fillStyle = COLORES.MARRON; ctx.fillRect(0,0,ANCHO,ALTO);
+        objs.p_zorro.dibujar(ctx); objs.zorro.dibujar(ctx);
+    } else if (gameState.dim==="feliz"){
+        ctx.fillStyle = COLORES.AMARILLO; ctx.fillRect(0,0,ANCHO,ALTO);
+        [objs.puertaF, objs.pecera, objs.leon, objs.raton, objs.mono].forEach(o=>o.dibujar(ctx));
+        if(!(gameState.z_escapado && !gameState.m_zorro)) objs.zorro.dibujar(ctx);
+    } else if (gameState.dim==="gris"){
+        ctx.fillStyle = COLORES.GRIS; ctx.fillRect(0,0,ANCHO,ALTO);
+        [objs.cuevaG, objs.rana, objs.arana].forEach(o=>o.dibujar(ctx));
+        if(!objs.flor.recogida) objs.flor.dibujar(ctx);
+    }
+
+    objs.gato.dibujar(ctx, ox, oy); 
+    objs.jugador.dibujar(ctx, ox, oy);
+    dibujarIndicadores(ctx, ox, oy);
+    drawUI(ctx);
+    
+    // Instrucciones
+    ctx.fillStyle = COLORES.NEGRO; ctx.font = "20px sans-serif";
+    if (!modoMobile) {
+        ctx.fillText("WASD/Flechas: Mover | ESPACIO: Interactuar", 10, 20);
+    } else {
+        ctx.fillText("Modo Mobile Activo (Cruceta de Control)", 10, 20);
+    }
+    const dMap = {"feliz": "Escuela Feliz", "gris": "Cueva Gris", "casa_zorro": "Casa de Zorro", "casa_elefante": "Casa de Elefante", "normal": "Mundo Normal"};
+    ctx.fillText(`Dimensión: ${dMap[gameState.dim]}`, 10, 45);
+}
+
+// ARRANQUE
+cargarAudio('Carefree(BackgroundMusic).mp3', true, 0.5);
+cargarAudio('ClickMC.mp3', false, 0.7);
+cargarAudio('PersonajesHablando.mp3', false, 0.8);
+cargarAudio('Pencil.mp3', false, 0.8);
+inicializarJuego();
+
+Promise.all(loadPromise).then(() => {
+    requestAnimationFrame(loop);
+});
+
+</script>
+</body>
+</html>
