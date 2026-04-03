@@ -1,7 +1,7 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: "com.ignacio.mundofeliz",   
+  appId: "com.ignacio.mundofeliz",
   appName: "El Mundo Feliz",
   webDir: "www",
   android: {
@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 0,        // Oculta la splash screen casi inmediatamente
+      launchShowDuration: 0,
       launchAutoHide: true,
       backgroundColor: "#000000",
       showSpinner: true
